@@ -1,0 +1,16 @@
+{
+  "schedule": "R//PT1440M",
+  "name": "gokafka-replication-checker",
+  "container": {
+    "type": "DOCKER",
+    "image": "%PROVIDER%%/%%DOMAIN%%/gokafka-replication-checker:latest",
+    "forcePullImage": true,
+    "network": "BRIDGE"
+  },
+  "command": "/usr/bin/envconsul-launch -secret-no-prefix gokafka-replication-checker/secrets /usr/bin/go run /opt/gotools/src/replication-factor.go",
+  "uris": [
+    "file:///etc/mesos/.dockercfg"
+  ],
+  "cpus": "0.1",
+  "mem": "512"
+}
