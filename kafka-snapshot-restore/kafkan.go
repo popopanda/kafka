@@ -59,7 +59,7 @@ func getSnapshot(svc *ec2.EC2, environment string, brokers map[string]string, mo
 										// fmt.Println(*mountTag.Key, *mountTag.Value)
 										createVolID := createVol(svc, *snapshot.SnapshotId, *definedTags.Value, *mountTag.Value, environment, az)
 										time.Sleep(10 * time.Second)
-										attachVolume(svc, createVolID, *mountTag.Value, environment)
+										attachVolume(svc, createVolID, *mountTag.Value, environment, az)
 									}
 								}
 							}
@@ -140,6 +140,12 @@ func getNewKafkaVolumes(svc *ec2.EC2, environment string) {
 					aws.String("kafka"),
 				},
 			},
+			{
+				Name: aws.String("instance-state-name"),
+				Values: []*string{
+					aws.String("running"),
+				},
+			},
 		},
 	})
 
@@ -203,7 +209,7 @@ func detachVols(svc *ec2.EC2, volID string) {
 }
 
 // mount restored volumes to new kafka instances
-func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment string) {
+func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment, az string) {
 
 	newInstanceID, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
@@ -228,17 +234,25 @@ func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment string) {
 
 	for _, reservation := range newInstanceID.Reservations {
 		for _, instance := range reservation.Instances {
-			attachResult, err := svc.AttachVolume(&ec2.AttachVolumeInput{
-				Device:     aws.String(mountTagID),
-				InstanceId: aws.String(*instance.InstanceId),
-				VolumeId:   aws.String(VolID),
-			})
+			if instance.Placement.AvailabilityZone == aws.String(az) {
+				attachResult, err := svc.AttachVolume(&ec2.AttachVolumeInput{
+					Device:     aws.String(mountTagID),
+					InstanceId: aws.String(*instance.InstanceId),
+					VolumeId:   aws.String(VolID),
+				})
+				fmt.Println(*attachResult.State)
+
+				if err != nil {
+					log.Fatal(err)
+				}
+			} else {
+				continue
+			}
 
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			fmt.Println(*attachResult.State)
 		}
 	}
 
