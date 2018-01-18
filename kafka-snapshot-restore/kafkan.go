@@ -12,7 +12,6 @@ import (
 
 func main() {
 	env := "uat2"
-	// brokers := []string{"kafka-mirror-3", "kafka-mirror-4", "kafka-mirror-5"}
 	brokers := map[string]string{
 		"kafka-mirror-0": "us-east-1b",
 		"kafka-mirror-1": "us-east-1d",
@@ -24,6 +23,9 @@ func main() {
 	svc := ec2.New(sess)
 
 	getNewKafkaVolumes(svc, env)
+	fmt.Println("Waiting for Volumes to finish detaching...")
+	time.Sleep(time.Second * 180)
+	fmt.Println("Creating Volumes")
 	getSnapshot(svc, env, brokers, mountPoints)
 
 }
@@ -57,9 +59,10 @@ func getSnapshot(svc *ec2.EC2, environment string, brokers map[string]string, mo
 										// fmt.Printf("getSnapshot function %v: %v \n", *tag.Key, *tag.Value)
 										// fmt.Printf("getSnapshot function %v: %v === %v \n", *definedTags.Key, *definedTags.Value, broker)
 										// fmt.Println(*mountTag.Key, *mountTag.Value)
-										createVolID := createVol(svc, *snapshot.SnapshotId, *definedTags.Value, *mountTag.Value, environment, az)
+										createVolID, createVolAZ := createVol(svc, *snapshot.SnapshotId, *definedTags.Value, *mountTag.Value, environment, az)
+										fmt.Printf("Waiting for %v to finish creating...\n", createVolID)
 										time.Sleep(10 * time.Second)
-										attachVolume(svc, createVolID, *mountTag.Value, environment, az)
+										attachVolume(svc, createVolID, *mountTag.Value, environment, createVolAZ, *definedTags.Value)
 									}
 								}
 							}
@@ -73,11 +76,10 @@ func getSnapshot(svc *ec2.EC2, environment string, brokers map[string]string, mo
 	}
 }
 
-func createVol(svc *ec2.EC2, snapshotID, broker, mountTag, env, az string) string {
+func createVol(svc *ec2.EC2, snapshotID, broker, mountTag, env, az string) (string, string) {
 	volTagName := fmt.Sprintf("%v-%v-%v", broker, mountTag, snapshotID)
 
 	input := &ec2.CreateVolumeInput{
-		// need to find out how to dynamic AZ
 		AvailabilityZone: aws.String(az),
 		SnapshotId:       aws.String(snapshotID),
 		VolumeType:       aws.String("gp2"),
@@ -120,7 +122,7 @@ func createVol(svc *ec2.EC2, snapshotID, broker, mountTag, env, az string) strin
 	}
 
 	// fmt.Printf("CreateVol function - %v: %v\n", *result.SnapshotId, *result.VolumeId)
-	return *result.VolumeId
+	return *result.VolumeId, *result.AvailabilityZone
 
 }
 
@@ -205,11 +207,10 @@ func detachVols(svc *ec2.EC2, volID string) {
 	}
 
 	fmt.Println(*detachResult.State)
-
 }
 
 // mount restored volumes to new kafka instances
-func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment, az string) {
+func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment, az, broker string) {
 
 	newInstanceID, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
@@ -234,7 +235,7 @@ func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment, az string) {
 
 	for _, reservation := range newInstanceID.Reservations {
 		for _, instance := range reservation.Instances {
-			if instance.Placement.AvailabilityZone == aws.String(az) {
+			if *instance.Placement.AvailabilityZone == az {
 				attachResult, err := svc.AttachVolume(&ec2.AttachVolumeInput{
 					Device:     aws.String(mountTagID),
 					InstanceId: aws.String(*instance.InstanceId),
