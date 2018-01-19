@@ -206,7 +206,7 @@ func detachVols(svc *ec2.EC2, volID string) {
 		log.Fatal(err)
 	}
 
-	fmt.Println(*detachResult.State)
+	fmt.Printf("Volume: %v: %v\n", volID, *detachResult.State)
 }
 
 // mount restored volumes to new kafka instances
