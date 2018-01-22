@@ -24,10 +24,16 @@ func main() {
 
 	getNewKafkaVolumes(svc, env)
 	fmt.Println("Waiting for Volumes to finish detaching...")
-	time.Sleep(time.Second * 180)
+	time.Sleep(time.Second * 300)
 	fmt.Println("Creating Volumes")
 	getSnapshot(svc, env, brokers, mountPoints)
-
+	fmt.Println("Waiting for new volumes to finish attaching")
+	time.Sleep(time.Second * 300)
+	fmt.Println("Rebooting instances now")
+	instanceReboot(svc, env)
+	fmt.Println("Waiting...")
+	time.Sleep(time.Second * 300)
+	fmt.Println("Kafka Restored")
 }
 
 func getSnapshot(svc *ec2.EC2, environment string, brokers map[string]string, mountPoints []string) {
@@ -256,5 +262,45 @@ func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment, az, broker strin
 
 		}
 	}
+}
 
+func instanceReboot(svc *ec2.EC2, environment string) *ec2.RebootInstancesOutput {
+
+	// Create Function for this:
+	newInstanceID, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			&ec2.Filter{
+				Name: aws.String("tag:Environment"),
+				Values: []*string{
+					aws.String(environment),
+				},
+			},
+			{
+				Name: aws.String("tag:Role"),
+				Values: []*string{
+					aws.String("kafka"),
+				},
+			},
+		},
+	})
+
+	hosts := []string{}
+
+	for _, reservation := range newInstanceID.Reservations {
+		for _, instance := range reservation.Instances {
+			hosts = append(hosts, *instance.InstanceId)
+		}
+	}
+
+	rebootInput := &ec2.RebootInstancesInput{
+		InstanceIds: aws.StringSlice(hosts),
+	}
+
+	rebootResult, err := svc.RebootInstances(rebootInput)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return rebootResult
 }
