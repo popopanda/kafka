@@ -232,6 +232,12 @@ func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment, az, broker strin
 					aws.String("kafka"),
 				},
 			},
+			{
+				Name: aws.String("instance-state-name"),
+				Values: []*string{
+					aws.String("running"),
+				},
+			},
 		},
 	})
 
@@ -279,6 +285,12 @@ func instanceReboot(svc *ec2.EC2, environment string) *ec2.RebootInstancesOutput
 				Name: aws.String("tag:Role"),
 				Values: []*string{
 					aws.String("kafka"),
+				},
+			},
+			{
+				Name: aws.String("instance-state-name"),
+				Values: []*string{
+					aws.String("running"),
 				},
 			},
 		},
