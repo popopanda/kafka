@@ -25,6 +25,8 @@ func main() {
 	getNewKafkaVolumes(svc, env)
 	fmt.Println("Waiting for Volumes to finish detaching...")
 	time.Sleep(time.Second * 300)
+	fmt.Println("Rebooting...")
+	instanceReboot(svc, env)
 	fmt.Println("Creating Volumes")
 	getSnapshot(svc, env, brokers, mountPoints)
 	fmt.Println("Waiting for new volumes to finish attaching")
@@ -134,28 +136,7 @@ func createVol(svc *ec2.EC2, snapshotID, broker, mountTag, env, az string) (stri
 
 // Get new kafka instance volumes
 func getNewKafkaVolumes(svc *ec2.EC2, environment string) {
-	volResult, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
-		Filters: []*ec2.Filter{
-			&ec2.Filter{
-				Name: aws.String("tag:Environment"),
-				Values: []*string{
-					aws.String(environment),
-				},
-			},
-			{
-				Name: aws.String("tag:Role"),
-				Values: []*string{
-					aws.String("kafka"),
-				},
-			},
-			{
-				Name: aws.String("instance-state-name"),
-				Values: []*string{
-					aws.String("running"),
-				},
-			},
-		},
-	})
+	volResult, err := describeInstances(svc, environment)
 
 	if err != nil {
 		log.Fatal(err)
@@ -218,28 +199,7 @@ func detachVols(svc *ec2.EC2, volID string) {
 // mount restored volumes to new kafka instances
 func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment, az, broker string) {
 
-	newInstanceID, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
-		Filters: []*ec2.Filter{
-			&ec2.Filter{
-				Name: aws.String("tag:Environment"),
-				Values: []*string{
-					aws.String(environment),
-				},
-			},
-			{
-				Name: aws.String("tag:Role"),
-				Values: []*string{
-					aws.String("kafka"),
-				},
-			},
-			{
-				Name: aws.String("instance-state-name"),
-				Values: []*string{
-					aws.String("running"),
-				},
-			},
-		},
-	})
+	newInstanceID, err := describeInstances(svc, environment)
 
 	if err != nil {
 		log.Fatal(err)
@@ -273,7 +233,31 @@ func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment, az, broker strin
 func instanceReboot(svc *ec2.EC2, environment string) *ec2.RebootInstancesOutput {
 
 	// Create Function for this:
-	newInstanceID, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
+	newInstanceID, err := describeInstances(svc, environment)
+
+	hosts := []string{}
+
+	for _, reservation := range newInstanceID.Reservations {
+		for _, instance := range reservation.Instances {
+			hosts = append(hosts, *instance.InstanceId)
+		}
+	}
+
+	rebootInput := &ec2.RebootInstancesInput{
+		InstanceIds: aws.StringSlice(hosts),
+	}
+
+	rebootResult, err := svc.RebootInstances(rebootInput)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return rebootResult
+}
+
+func describeInstances(svc *ec2.EC2, environment string) (*ec2.DescribeInstancesOutput, error) {
+	instanceID, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			&ec2.Filter{
 				Name: aws.String("tag:Environment"),
@@ -296,23 +280,5 @@ func instanceReboot(svc *ec2.EC2, environment string) *ec2.RebootInstancesOutput
 		},
 	})
 
-	hosts := []string{}
-
-	for _, reservation := range newInstanceID.Reservations {
-		for _, instance := range reservation.Instances {
-			hosts = append(hosts, *instance.InstanceId)
-		}
-	}
-
-	rebootInput := &ec2.RebootInstancesInput{
-		InstanceIds: aws.StringSlice(hosts),
-	}
-
-	rebootResult, err := svc.RebootInstances(rebootInput)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return rebootResult
+	return instanceID, err
 }
