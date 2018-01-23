@@ -19,18 +19,29 @@ func main() {
 	}
 	mountPoints := []string{"/dev/sds", "/dev/sdt", "/dev/sdu"}
 
+	// Create session
 	sess := session.Must(session.NewSession())
 	svc := ec2.New(sess)
 
+	// Detach vols
 	getNewKafkaVolumes(svc, env)
 	fmt.Println("Waiting for Volumes to finish detaching...")
 	time.Sleep(time.Second * 300)
+
+	// Reboot instances
 	fmt.Println("Rebooting...")
 	instanceReboot(svc, env)
+	time.Sleep(time.Second * 60)
+
+	// Create Volumes and attach
 	fmt.Println("Creating Volumes")
 	getSnapshot(svc, env, brokers, mountPoints)
 	fmt.Println("Waiting for new volumes to finish attaching")
 	time.Sleep(time.Second * 300)
+
+	// Add logic to repopulate zookeeper?
+
+	// reboot instances
 	fmt.Println("Rebooting instances now")
 	instanceReboot(svc, env)
 	fmt.Println("Waiting...")
@@ -232,7 +243,6 @@ func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment, az, broker strin
 
 func instanceReboot(svc *ec2.EC2, environment string) *ec2.RebootInstancesOutput {
 
-	// Create Function for this:
 	newInstanceID, err := describeInstances(svc, environment)
 
 	hosts := []string{}
@@ -256,7 +266,7 @@ func instanceReboot(svc *ec2.EC2, environment string) *ec2.RebootInstancesOutput
 	return rebootResult
 }
 
-func describeInstances(svc *ec2.EC2, environment string) (*ec2.DescribeInstancesOutput, error) {
+func describeInstances(svc *ec2.EC2, environment string) (ec2.DescribeInstancesOutput, error) {
 	instanceID, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			&ec2.Filter{
@@ -280,5 +290,5 @@ func describeInstances(svc *ec2.EC2, environment string) (*ec2.DescribeInstances
 		},
 	})
 
-	return instanceID, err
+	return *instanceID, err
 }
