@@ -26,6 +26,8 @@ func main() {
 	sess := session.Must(session.NewSession())
 	svc := ec2.New(sess)
 
+	//Stop kafka first on brokers
+
 	// Detach vols
 	getNewKafkaVolumes(svc, env)
 	fmt.Println("Waiting for Volumes to finish detaching...")
