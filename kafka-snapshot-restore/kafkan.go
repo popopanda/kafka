@@ -11,12 +11,15 @@ import (
 )
 
 func main() {
+	// Set Environment
 	env := "uat2"
+	// Set Kafka-mirror brokers to ID the snapshots to restore
 	brokers := map[string]string{
 		"kafka-mirror-0": "us-east-1b",
 		"kafka-mirror-1": "us-east-1d",
 		"kafka-mirror-2": "us-east-1e",
 	}
+	// Specify the mount points for attachment
 	mountPoints := []string{"/dev/sds", "/dev/sdt", "/dev/sdu"}
 
 	// Create session
@@ -31,7 +34,7 @@ func main() {
 	// Reboot instances
 	fmt.Println("Rebooting...")
 	instanceReboot(svc, env)
-	time.Sleep(time.Second * 60)
+	time.Sleep(time.Second * 300)
 
 	// Create Volumes and attach
 	fmt.Println("Creating Volumes")
@@ -50,6 +53,7 @@ func main() {
 }
 
 func getSnapshot(svc *ec2.EC2, environment string, brokers map[string]string, mountPoints []string) {
+	// Locate the Kafka snapshots
 	result, err := svc.DescribeSnapshots(&ec2.DescribeSnapshotsInput{
 		Filters: []*ec2.Filter{
 			&ec2.Filter{
@@ -64,23 +68,25 @@ func getSnapshot(svc *ec2.EC2, environment string, brokers map[string]string, mo
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	//Find the correct snapshots and attach the volumes
 	for _, snapshot := range result.Snapshots {
 		for _, tag := range snapshot.Tags {
+			// Find tag of Restore == true
 			if *tag.Key == *aws.String("Restore") && *tag.Value == *aws.String("true") {
 				for _, definedTags := range snapshot.Tags {
 					for broker, az := range brokers {
+						// Find Broker tag and match it to the brokers map variable
 						if *definedTags.Key == *aws.String("Broker") && *definedTags.Value == *aws.String(broker) {
 							for _, mountTag := range snapshot.Tags {
 								for _, mount := range mountPoints {
+									// Find the Mount tag and match it to the mountPoints slices
 									if *mountTag.Key == *aws.String("Mount") && *mountTag.Value == *aws.String(mount) {
-										// fmt.Println()
-										// fmt.Printf("getSnapshot function %v: %v \n", *tag.Key, *tag.Value)
-										// fmt.Printf("getSnapshot function %v: %v === %v \n", *definedTags.Key, *definedTags.Value, broker)
-										// fmt.Println(*mountTag.Key, *mountTag.Value)
+										// Create the volume
 										createVolID, createVolAZ := createVol(svc, *snapshot.SnapshotId, *definedTags.Value, *mountTag.Value, environment, az)
 										fmt.Printf("Waiting for %v to finish creating...\n", createVolID)
+										// Sleep for 10 seconds
 										time.Sleep(10 * time.Second)
+										// Attach the volume to the host
 										attachVolume(svc, createVolID, *mountTag.Value, environment, createVolAZ, *definedTags.Value)
 									}
 								}
@@ -95,6 +101,7 @@ func getSnapshot(svc *ec2.EC2, environment string, brokers map[string]string, mo
 	}
 }
 
+// Create the volumes
 func createVol(svc *ec2.EC2, snapshotID, broker, mountTag, env, az string) (string, string) {
 	volTagName := fmt.Sprintf("%v-%v-%v", broker, mountTag, snapshotID)
 
@@ -140,7 +147,6 @@ func createVol(svc *ec2.EC2, snapshotID, broker, mountTag, env, az string) (stri
 		log.Fatal(err)
 	}
 
-	// fmt.Printf("CreateVol function - %v: %v\n", *result.SnapshotId, *result.VolumeId)
 	return *result.VolumeId, *result.AvailabilityZone
 
 }
@@ -156,7 +162,6 @@ func getNewKafkaVolumes(svc *ec2.EC2, environment string) {
 	for _, reservation := range volResult.Reservations {
 		for _, instance := range reservation.Instances {
 			for _, blkdev := range instance.BlockDeviceMappings {
-				// fmt.Println("getNewKafkaVolumes Function", *blkdev.Ebs.VolumeId)
 				filterNewKafkaRootVol(svc, *blkdev.Ebs.VolumeId)
 			}
 		}
@@ -186,7 +191,6 @@ func filterNewKafkaRootVol(svc *ec2.EC2, volID string) {
 			if *attachment.Device == "/dev/sda1" {
 				continue
 			} else {
-				// fmt.Printf("FilterNewKafkaRootVol Function - %v: %v\n", *attachment.VolumeId, *attachment.Device)
 				detachVols(svc, *attachment.VolumeId)
 			}
 		}
@@ -241,6 +245,7 @@ func attachVolume(svc *ec2.EC2, VolID, mountTagID, environment, az, broker strin
 	}
 }
 
+// Reboot instances
 func instanceReboot(svc *ec2.EC2, environment string) *ec2.RebootInstancesOutput {
 
 	newInstanceID, err := describeInstances(svc, environment)
@@ -266,6 +271,7 @@ func instanceReboot(svc *ec2.EC2, environment string) *ec2.RebootInstancesOutput
 	return rebootResult
 }
 
+// Function to locate correct instances
 func describeInstances(svc *ec2.EC2, environment string) (ec2.DescribeInstancesOutput, error) {
 	instanceID, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
